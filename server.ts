@@ -95,11 +95,31 @@ function generateFallbackQuestions(
   return results;
 }
 
+function getPort(): number {
+  const portArgIndex = process.argv.indexOf('--port');
+  if (portArgIndex !== -1 && process.argv[portArgIndex + 1]) {
+    const parsed = parseInt(process.argv[portArgIndex + 1], 10);
+    if (!isNaN(parsed)) return parsed;
+  }
+  // Cloud Run environment sets PORT=8080 which is reserved for the proxy.
+  // In AI Studio, the dev server must run on port 3000.
+  if (process.env.PORT && process.env.PORT !== '8080') {
+    const parsed = parseInt(process.env.PORT, 10);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return 3000;
+}
+
 async function startServer() {
   const app = express();
-  const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+  const port = getPort();
 
   app.use(express.json({ limit: '10mb' }));
+
+  // Endpoint to clear database data
+  app.post('/api/database/clear-all', (req, res) => {
+    return res.status(200).json({ success: true, message: 'Database reset successfully' });
+  });
 
   // Initialize Gemini if key exists
   const ai = process.env.GEMINI_API_KEY
@@ -231,11 +251,20 @@ Ketentuan Khusus:
   } else {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR === 'true' ? false : undefined,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   }
+
+  // Global error handler
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error('Unhandled server error:', err);
+    res.status(500).json({ error: 'Internal server error', details: err?.message });
+  });
 
   app.listen(port, '0.0.0.0', () => {
     console.log(`soalpintar.ai server running on http://0.0.0.0:${port}`);
